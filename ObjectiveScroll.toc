@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: ObjectiveScroll
+## Notes: Lays out every tracked quest and adds a scroll bar, clipped to the height you set in Edit Mode.
+## Author: 1nderr
+## Version: @project-version@
+## SavedVariables: ObjectiveScrollDB
+## Category: Quests
+## X-Website: https://github.com/1nderr/wow-objective-scroll
+## X-License: MIT
+
+ObjectiveScroll.lua
