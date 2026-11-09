@@ -6,6 +6,7 @@
 ## SavedVariables: ObjectiveScrollDB
 ## Category: Quests
 ## X-Website: https://github.com/1nderr/wow-objective-scroll
+## X-Curse-Project-ID: 1795022
 ## X-License: MIT
 
 ObjectiveScroll.lua

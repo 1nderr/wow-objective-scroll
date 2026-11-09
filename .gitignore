@@ -1,0 +1,10 @@
+# local packaging output
+.release/
+*.zip
+
+# editor / OS clutter
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

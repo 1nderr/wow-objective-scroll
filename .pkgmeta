@@ -1,0 +1,6 @@
+# Packaging rules for BigWigsMods/packager (used by .github/workflows/release.yml)
+package-as: ObjectiveScroll
+
+ignore:
+  - README.md
+  - logo.png

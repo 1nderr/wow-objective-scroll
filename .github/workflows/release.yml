@@ -1,0 +1,28 @@
+# Builds ObjectiveScroll and publishes it whenever a version tag (e.g. v1.0.0) is pushed.
+#  - GitHub Releases: always.
+#  - CurseForge: once "## X-Curse-Project-ID" is in ObjectiveScroll.toc and the
+#    CF_API_KEY secret is set in the repo (Settings > Secrets and variables > Actions).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out the code (with full history, for the changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Package and upload
+        uses: BigWigsMods/packager@v2
