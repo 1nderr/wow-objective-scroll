@@ -46,6 +46,7 @@ local shiftX = 0 -- how far we slide the tracker left so the scroll bar fits on 
 local busy = false -- guards our own calls from our hooks
 local editMode = false
 local dirty = true
+local barAnchoredWidth -- bar width the scroll bar was last anchored with (nil = re-anchor)
 local ApplyBarStyle -- defined with the widgets; re-applies width/colour from settings
 local BuildSettings -- defined with the settings page below
 
@@ -267,8 +268,30 @@ local function VerticalShift(p)
 	end
 end
 
+-- True if the tracker is already anchored exactly as ApplyTrackerAnchors would anchor it.
+local function TrackerAnchorsMatch(stretched)
+	if tracker:GetNumPoints() ~= #trackerBase then
+		return false
+	end
+	for i, b in ipairs(trackerBase) do
+		local p, rel, rp, x, y = tracker:GetPoint(i)
+		local wx, wy = b[4], b[5]
+		if stretched then
+			wx, wy = wx + shiftX, wy + VerticalShift(b[1])
+		end
+		if p ~= b[1] or rel ~= b[2] or rp ~= b[3]
+			or math.abs((x or 0) - wx) > 0.01 or math.abs((y or 0) - wy) > 0.01 then
+			return false
+		end
+	end
+	return true
+end
+
+-- Re-anchoring a frame (even to the same spot) makes the game re-check what's under the
+-- mouse, which closes and re-opens the hovered quest's tooltip. In a group Blizzard updates
+-- the tracker many times a second, so only touch anchors when they actually differ.
 local function ApplyTrackerAnchors(stretched)
-	if #trackerBase == 0 or Blocked(tracker) then
+	if #trackerBase == 0 or Blocked(tracker) or TrackerAnchorsMatch(stretched) then
 		return
 	end
 	busy = true
@@ -289,9 +312,11 @@ local function StretchTracker()
 		return
 	end
 	ApplyTrackerAnchors(true)
-	busy = true
-	tracker:SetHeight(TALL_HEIGHT)
-	busy = false
+	if math.abs(tracker:GetHeight() - TALL_HEIGHT) > 0.01 then
+		busy = true
+		tracker:SetHeight(TALL_HEIGHT)
+		busy = false
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -428,10 +453,23 @@ local function UpdateLayout()
 		return
 	end
 	local top = ClipTop()
-	clip:ClearAllPoints()
-	clip:SetPoint("TOPLEFT", tracker, "TOPLEFT", -LEFT_PAD, -top)
-	clip:SetSize(tracker:GetWidth() + LEFT_PAD + RightPad(), math.max(1, visibleHeight - top))
-	clip:SetFrameLevel(tracker:GetFrameLevel() + 3)
+	-- Only touch the clip when something changed; re-anchoring it every update closes the
+	-- hovered quest's tooltip for a frame (see ApplyTrackerAnchors).
+	local p, rel, rp, x, y = clip:GetPoint(1)
+	if clip:GetNumPoints() ~= 1 or p ~= "TOPLEFT" or rel ~= tracker or rp ~= "TOPLEFT"
+		or x ~= -LEFT_PAD or y ~= -top then
+		clip:ClearAllPoints()
+		clip:SetPoint("TOPLEFT", tracker, "TOPLEFT", -LEFT_PAD, -top)
+	end
+	local w, h = tracker:GetWidth() + LEFT_PAD + RightPad(), math.max(1, visibleHeight - top)
+	local cw, ch = clip:GetSize()
+	if math.abs(cw - w) > 0.01 or math.abs(ch - h) > 0.01 then
+		clip:SetSize(w, h)
+	end
+	local level = tracker:GetFrameLevel() + 3
+	if clip:GetFrameLevel() ~= level then
+		clip:SetFrameLevel(level)
+	end
 
 	UpdateContentHeight()
 	range = math.max(0, math.floor(contentHeight - visibleHeight + 0.5))
@@ -468,12 +506,15 @@ local function UpdateLayout()
 		-- bar sits just outside the tracker's right edge (BAR_GAP px past it), clear of the
 		-- quest-item buttons. Leave a little room between the tracker and the screen edge.
 		local w = BarWidth()
-		bar:ClearAllPoints()
-		bar:SetWidth(w)
-		-- always just outside the tracker's right edge (the tracker is slid left if needed, below)
-		bar:SetPoint("TOPLEFT", clip, "TOPRIGHT", -RightPad() + BAR_GAP, -4)
-		bar:SetPoint("BOTTOMLEFT", clip, "BOTTOMRIGHT", -RightPad() + BAR_GAP, 8)
-		thumb:SetWidth(w)
+		if w ~= barAnchoredWidth then
+			barAnchoredWidth = w
+			bar:ClearAllPoints()
+			bar:SetWidth(w)
+			-- always just outside the tracker's right edge (the tracker is slid left if needed, below)
+			bar:SetPoint("TOPLEFT", clip, "TOPRIGHT", -RightPad() + BAR_GAP, -4)
+			bar:SetPoint("BOTTOMLEFT", clip, "BOTTOMRIGHT", -RightPad() + BAR_GAP, 8)
+			thumb:SetWidth(w)
+		end
 
 		local barH = bar:GetHeight()
 		local thumbH = math.max(24, barH * visibleHeight / contentHeight)
