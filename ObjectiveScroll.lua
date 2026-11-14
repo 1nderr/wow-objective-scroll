@@ -1,14 +1,12 @@
+local _, ns = ...
+local GetDatabase = ns.GetDatabase
+local ResetDatabase = ns.ResetDatabase
+
 local TALL_HEIGHT = 4000
 local WHEEL_STEP = 45
 local LEFT_PAD = 40
 local BAR_GAP = 10
 local MIN_WIDTH, MAX_WIDTH = 2, 24
-local DEFAULTS = {
-	enabled = true,
-	barWidth = 8,
-	barColor = { 96 / 255, 96 / 255, 96 / 255 },
-}
-local DB_VERSION = 2
 local SMOOTHNESS = 14
 
 local tracker
@@ -31,30 +29,9 @@ local editMode = false
 local dirty = true
 local barAnchoredWidth
 local ApplyBarStyle
-local BuildSettings
-
-local function DB()
-	ObjectiveScrollDB = ObjectiveScrollDB or {}
-	local db = ObjectiveScrollDB
-	if (db.version or 1) < DB_VERSION then
-		db.barWidth = DEFAULTS.barWidth
-		db.barColor = { unpack(DEFAULTS.barColor) }
-		db.version = DB_VERSION
-	end
-	if db.enabled == nil then
-		db.enabled = DEFAULTS.enabled
-	end
-	if type(db.barWidth) ~= "number" then
-		db.barWidth = DEFAULTS.barWidth
-	end
-	if type(db.barColor) ~= "table" or #db.barColor < 3 then
-		db.barColor = { unpack(DEFAULTS.barColor) }
-	end
-	return db
-end
 
 local function BarWidth()
-	return math.max(MIN_WIDTH, math.min(MAX_WIDTH, math.floor(DB().barWidth + 0.5)))
+	return math.max(MIN_WIDTH, math.min(MAX_WIDTH, math.floor(GetDatabase().barWidth + 0.5)))
 end
 
 local function RightPad()
@@ -496,7 +473,7 @@ local function Tick(_, elapsed)
 		return
 	end
 
-	local want = DB().enabled and not editMode and not IsDefaultPosition()
+	local want = GetDatabase().enabled and not editMode and not IsDefaultPosition()
 	if want and not attached then
 		Attach()
 	elseif not want and attached then
@@ -571,7 +548,7 @@ local function CreateWidgets()
 	thumb:EnableMouse(true)
 	local setThumbColor = MakePill(thumb, "ARTWORK")
 	local function SetThumbColor(hover)
-		local c = DB().barColor
+		local c = GetDatabase().barColor
 		local r, g, b = c[1], c[2], c[3]
 		if hover then
 			r, g, b = math.min(1, r + 0.12), math.min(1, g + 0.12), math.min(1, b + 0.12)
@@ -696,22 +673,6 @@ local function TryInit()
 	end
 end
 
-local ev = CreateFrame("Frame")
-ev:RegisterEvent("ADDON_LOADED")
-ev:RegisterEvent("PLAYER_LOGIN")
-ev:RegisterEvent("PLAYER_REGEN_ENABLED")
-ev:SetScript("OnEvent", function(_, event)
-	if event == "PLAYER_REGEN_ENABLED" then
-		dirty = true
-	else
-		DB()
-		TryInit()
-		if event == "PLAYER_LOGIN" then
-			BuildSettings()
-		end
-	end
-end)
-
 local settingsCategory
 local PRESETS = {
 	{ "Gold", nil },
@@ -737,7 +698,7 @@ local function StyleChanged()
 	dirty = true
 end
 
-function BuildSettings()
+local function BuildSettings()
 	if settingsCategory then
 		return
 	end
@@ -759,11 +720,11 @@ function BuildSettings()
 	enableLabel:SetPoint("LEFT", enable, "RIGHT", 4, 0)
 	enableLabel:SetText("Enable scrolling quest tracker")
 	enable:SetScript("OnClick", function(self)
-		DB().enabled = self:GetChecked() and true or false
+		GetDatabase().enabled = self:GetChecked() and true or false
 		dirty = true
 	end)
 	refreshers[#refreshers + 1] = function()
-		enable:SetChecked(DB().enabled)
+		enable:SetChecked(GetDatabase().enabled)
 	end
 
 	local widthLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -810,7 +771,7 @@ function BuildSettings()
 		if syncing then
 			return
 		end
-		DB().barWidth = v
+		GetDatabase().barWidth = v
 		StyleChanged()
 	end)
 	slider:SetScript("OnMouseWheel", function(self, delta)
@@ -848,7 +809,7 @@ function BuildSettings()
 	currentText:SetPoint("LEFT", current, "RIGHT", 10, 0)
 
 	local function SetColor(r, g, b)
-		DB().barColor = { r, g, b }
+		GetDatabase().barColor = { r, g, b }
 		current.fill:SetColorTexture(r, g, b, 1)
 		currentText:SetText(
 			string.format(
@@ -861,7 +822,7 @@ function BuildSettings()
 		StyleChanged()
 	end
 	refreshers[#refreshers + 1] = function()
-		local c = DB().barColor
+		local c = GetDatabase().barColor
 		current.fill:SetColorTexture(c[1], c[2], c[3], 1)
 		currentText:SetText(
 			string.format(
@@ -874,7 +835,7 @@ function BuildSettings()
 	end
 
 	current:SetScript("OnClick", function()
-		local c = DB().barColor
+		local c = GetDatabase().barColor
 		local pr, pg, pb = c[1], c[2], c[3]
 		local function OnChange()
 			local r, g, b = ColorPickerFrame:GetColorRGB()
@@ -930,9 +891,7 @@ function BuildSettings()
 	reset:SetPoint("TOPLEFT", presetLabel, "BOTTOMLEFT", 0, -8 - math.ceil(#PRESETS / PER_ROW) * ROW_H - 16)
 	reset:SetText("Reset to defaults")
 	reset:SetScript("OnClick", function()
-		DB().enabled = DEFAULTS.enabled
-		DB().barWidth = DEFAULTS.barWidth
-		DB().barColor = { unpack(DEFAULTS.barColor) }
+		ResetDatabase()
 		StyleChanged()
 		for _, fn in ipairs(refreshers) do
 			fn()
@@ -971,6 +930,14 @@ local function OpenSettings()
 	end
 end
 
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("PLAYER_LOGIN")
+ev:SetScript("OnEvent", function()
+	GetDatabase()
+	TryInit()
+	BuildSettings()
+end)
+
 SLASH_OBJECTIVESCROLL1 = "/oscroll"
 SlashCmdList.OBJECTIVESCROLL = function(msg)
 	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
@@ -980,12 +947,12 @@ SlashCmdList.OBJECTIVESCROLL = function(msg)
 		OpenSettings()
 	elseif msg == "on" or msg == "off" or msg == "" then
 		if msg == "" then
-			DB().enabled = not DB().enabled
+			GetDatabase().enabled = not GetDatabase().enabled
 		else
-			DB().enabled = (msg == "on")
+			GetDatabase().enabled = (msg == "on")
 		end
 		dirty = true
-		Print(DB().enabled and "enabled" or "disabled")
+		Print(GetDatabase().enabled and "enabled" or "disabled")
 	else
 		Print("/oscroll  - toggle   |  /oscroll on|off  |  /oscroll top  |  /oscroll config - settings")
 	end

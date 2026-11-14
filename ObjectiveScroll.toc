@@ -9,4 +9,5 @@
 ## X-Curse-Project-ID: 1795022
 ## X-License: MIT
 
+Database.lua
 ObjectiveScroll.lua
