@@ -31,17 +31,11 @@ local function Print(msg)
 end
 
 local function Blocked(frame)
-	return InCombatLockdown() and frame:IsProtected() and true or false
+	return InCombatLockdown() and frame:IsProtected()
 end
 
 local function IsDefaultPosition()
-	if objectiveTracker.IsInDefaultPosition then
-		local ok, res = pcall(objectiveTracker.IsInDefaultPosition, objectiveTracker)
-		if ok then
-			return res
-		end
-	end
-	return false
+	return objectiveTracker:IsInDefaultPosition()
 end
 
 local function ClipTop()
@@ -361,20 +355,13 @@ local function Detach()
 	shiftX = 0
 	ApplyTrackerAnchors(false)
 	busy = true
-	if visibleHeight then
-		objectiveTracker:SetHeight(visibleHeight)
-	end
+	objectiveTracker:SetHeight(visibleHeight)
 	busy = false
-	if origClamped ~= nil then
-		objectiveTracker:SetClampedToScreen(origClamped)
-	end
+	objectiveTracker:SetClampedToScreen(origClamped)
 	scrollView:Hide()
 end
 
 local function UpdateLayout()
-	if not visibleHeight then
-		return
-	end
 	local top = ClipTop()
 	local p, rel, rp, x, y = scrollView:GetPoint(1)
 	if
@@ -446,9 +433,6 @@ local function Tick(_, elapsed)
 	end
 	elapsedAcc = 0
 	dirty = false
-	if not objectiveTracker then
-		return
-	end
 
 	local want = not editMode and not IsDefaultPosition()
 	if want and not attached then
@@ -490,7 +474,6 @@ local function CreateScrollUi()
 	scrollBar:SetFrameLevel(scrollView:GetFrameLevel() + 50)
 	scrollBar:SetPoint("TOP", scrollView, "TOPRIGHT", -(SCROLLBAR_WIDTH / 2 + 2), -4)
 	scrollBar:SetPoint("BOTTOM", scrollView, "BOTTOMRIGHT", -(SCROLLBAR_WIDTH / 2 + 2), 8)
-	scrollBar:Hide()
 	scrollBar:RegisterCallback("OnScroll", function(_, percentage)
 		if syncingScrollBar then
 			return
@@ -536,23 +519,18 @@ local function HookTracker()
 	end)
 	HookNineSlice()
 
-	if EditModeManagerFrame then
-		EditModeManagerFrame:HookScript("OnShow", function()
-			editMode = true
-			dirty = true
-		end)
-		EditModeManagerFrame:HookScript("OnHide", function()
-			editMode = false
-			dirty = true
-		end)
-		editMode = EditModeManagerFrame:IsShown()
-	end
+	EditModeManagerFrame:HookScript("OnShow", function()
+		editMode = true
+		dirty = true
+	end)
+	EditModeManagerFrame:HookScript("OnHide", function()
+		editMode = false
+		dirty = true
+	end)
+	editMode = EditModeManagerFrame:IsShown()
 end
 
 local function Initialize()
-	if objectiveTracker or not ObjectiveTrackerFrame then
-		return
-	end
 	objectiveTracker = ObjectiveTrackerFrame
 
 	CreateScrollUi()
