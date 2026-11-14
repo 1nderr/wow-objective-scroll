@@ -423,14 +423,13 @@ local function UpdateLayout()
 	local scrollable = range > 0 and tracker:IsVisible()
 
 	local wantShift = 0
-	if scrollable then
-		local tr, sr = tracker:GetRight(), UIParent:GetRight()
-		if tr and sr then
-			local k = UIParent:GetEffectiveScale() / tracker:GetEffectiveScale()
-			local baseRight = tr - shiftX
-			local overflow = baseRight + RightPad() - sr * k
-			wantShift = -math.max(0, math.ceil(overflow))
-		end
+	local tr, sr = tracker:GetRight(), UIParent:GetRight()
+	if tr and sr then
+		local k = UIParent:GetEffectiveScale() / tracker:GetEffectiveScale()
+		local baseRight = tr - shiftX
+		local pad = scrollable and RightPad() or 0
+		local overflow = baseRight + pad - sr * k
+		wantShift = -math.max(0, math.ceil(overflow))
 	end
 	if wantShift ~= shiftX and #trackerBase > 0 and not Blocked(tracker) then
 		shiftX = wantShift
