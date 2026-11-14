@@ -1,7 +1,3 @@
-local _, ns = ...
-local GetDatabase = ns.GetDatabase
-local ResetDatabase = ns.ResetDatabase
-
 local TALL_HEIGHT = 4000
 local WHEEL_STEP = 45
 local LEFT_PAD = 40
@@ -454,7 +450,7 @@ local function Tick(_, elapsed)
 		return
 	end
 
-	local want = GetDatabase().enabled and not editMode and not IsDefaultPosition()
+	local want = not editMode and not IsDefaultPosition()
 	if want and not attached then
 		Attach()
 	elseif not want and attached then
@@ -571,104 +567,8 @@ local function Initialize()
 	end
 end
 
-local settingsCategory
-
-local function BuildSettings()
-	if settingsCategory then
-		return
-	end
-	local panel = CreateFrame("Frame")
-	panel:Hide()
-	panel.name = "ObjectiveScroll"
-	local refreshers = {}
-
-	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 16, -16)
-	title:SetText("ObjectiveScroll")
-	local sub = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
-	sub:SetText("Scroll bar for the quest tracker. Changes apply instantly.")
-
-	local enable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-	enable:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", -2, -16)
-	local enableLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	enableLabel:SetPoint("LEFT", enable, "RIGHT", 4, 0)
-	enableLabel:SetText("Enable scrolling quest tracker")
-	enable:SetScript("OnClick", function(self)
-		GetDatabase().enabled = self:GetChecked() and true or false
-		dirty = true
-	end)
-	refreshers[#refreshers + 1] = function()
-		enable:SetChecked(GetDatabase().enabled)
-	end
-
-	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", enable, "BOTTOMLEFT", 2, -20)
-	reset:SetText("Reset to defaults")
-	reset:SetScript("OnClick", function()
-		ResetDatabase()
-		dirty = true
-		for _, fn in ipairs(refreshers) do
-			fn()
-		end
-	end)
-
-	local hint = panel:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	hint:SetPoint("TOPLEFT", reset, "BOTTOMLEFT", 0, -12)
-	hint:SetText("Tip: the bar only appears when your quests don't all fit. /oscroll config opens this page.")
-
-	local function RefreshAll()
-		for _, fn in ipairs(refreshers) do
-			fn()
-		end
-	end
-	panel:SetScript("OnShow", RefreshAll)
-	panel.OnRefresh = RefreshAll
-	RefreshAll()
-
-	if Settings and Settings.RegisterCanvasLayoutCategory then
-		settingsCategory = Settings.RegisterCanvasLayoutCategory(panel, "ObjectiveScroll")
-		Settings.RegisterAddOnCategory(settingsCategory)
-	elseif InterfaceOptions_AddCategory then
-		InterfaceOptions_AddCategory(panel)
-		settingsCategory = panel
-	end
-end
-
-local function OpenSettings()
-	BuildSettings()
-	if Settings and Settings.OpenToCategory and settingsCategory and settingsCategory.GetID then
-		Settings.OpenToCategory(settingsCategory:GetID())
-	elseif InterfaceOptionsFrame_OpenToCategory and settingsCategory then
-		InterfaceOptionsFrame_OpenToCategory(settingsCategory)
-		InterfaceOptionsFrame_OpenToCategory(settingsCategory)
-	end
-end
-
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function()
 	Initialize()
-	BuildSettings()
 end)
-
-SLASH_OBJECTIVESCROLL1 = "/oscroll"
-SlashCmdList.OBJECTIVESCROLL = function(msg)
-	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
-	if msg == "top" then
-		SetOffset(0)
-	elseif msg == "config" or msg == "options" or msg == "settings" then
-		OpenSettings()
-	elseif msg == "on" or msg == "off" or msg == "" then
-		if msg == "" then
-			GetDatabase().enabled = not GetDatabase().enabled
-		else
-			GetDatabase().enabled = (msg == "on")
-		end
-		dirty = true
-		Print(GetDatabase().enabled and "enabled" or "disabled")
-	else
-		Print("/oscroll  - toggle   |  /oscroll on|off  |  /oscroll top  |  /oscroll config - settings")
-	end
-end

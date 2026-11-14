@@ -3,11 +3,10 @@
 ## Notes: Adds a scrollbar to the WoW Forever quest list
 ## Author: 1nderr
 ## Version: @project-version@
-## SavedVariables: ObjectiveScrollDB
 ## Category: Quests
+## IconTexture: Interface\AddOns\ObjectiveScroll\icon.png
 ## X-Website: https://github.com/1nderr/wow-objective-scroll
 ## X-Curse-Project-ID: 1795022
 ## X-License: MIT
 
-Database.lua
 ObjectiveScroll.lua
