@@ -6,12 +6,14 @@ local TALL_HEIGHT = 4000
 local WHEEL_STEP = 45
 local LEFT_PAD = 40
 local BAR_GAP = 10
-local MIN_WIDTH, MAX_WIDTH = 2, 24
+local SCROLLBAR_WIDTH = 17
+local RIGHT_PAD = BAR_GAP + SCROLLBAR_WIDTH + 2
 local SMOOTHNESS = 14
 
-local tracker
-local clip
-local bar, thumb
+local objectiveTracker
+local scrollView
+local scrollBar
+local syncingScrollBar = false
 local attached = false
 local origClamped
 local visibleHeight
@@ -27,16 +29,6 @@ local shiftX = 0
 local busy = false
 local editMode = false
 local dirty = true
-local barAnchoredWidth
-local ApplyBarStyle
-
-local function BarWidth()
-	return math.max(MIN_WIDTH, math.min(MAX_WIDTH, math.floor(GetDatabase().barWidth + 0.5)))
-end
-
-local function RightPad()
-	return BAR_GAP + BarWidth() + 2
-end
 
 local function Print(msg)
 	print("|cff66ccffObjectiveScroll:|r " .. msg)
@@ -47,8 +39,8 @@ local function Blocked(frame)
 end
 
 local function IsDefaultPosition()
-	if tracker.IsInDefaultPosition then
-		local ok, res = pcall(tracker.IsInDefaultPosition, tracker)
+	if objectiveTracker.IsInDefaultPosition then
+		local ok, res = pcall(objectiveTracker.IsInDefaultPosition, objectiveTracker)
 		if ok then
 			return res
 		end
@@ -57,7 +49,7 @@ local function IsDefaultPosition()
 end
 
 local function ClipTop()
-	return (tonumber(tracker.topModulePadding) or 38) - 4
+	return (tonumber(objectiveTracker.topModulePadding) or 38) - 4
 end
 
 local function ParseSetPoint(p, a, b, c, d)
@@ -77,8 +69,8 @@ end
 
 local function GetModules()
 	local list = {}
-	if type(tracker.modules) == "table" then
-		for _, m in ipairs(tracker.modules) do
+	if type(objectiveTracker.modules) == "table" then
+		for _, m in ipairs(objectiveTracker.modules) do
 			if type(m) == "table" and m.GetObjectType then
 				list[#list + 1] = m
 			end
@@ -106,20 +98,20 @@ end
 local function CaptureModuleAnchor(m)
 	for i = 1, m:GetNumPoints() do
 		local p, rel, rp, x, y = m:GetPoint(i)
-		if p and p:find("TOP") and (rel == tracker or rel == clip or rel == nil) then
-			moduleAnchors[m] = { p, tracker, rp, x or 0, (y or 0) - (attached and offset or 0) }
+		if p and p:find("TOP") and (rel == objectiveTracker or rel == scrollView or rel == nil) then
+			moduleAnchors[m] = { p, objectiveTracker, rp, x or 0, (y or 0) - (attached and offset or 0) }
 			return
 		end
 	end
 end
 
 local function UpdateContentHeight()
-	local top = tracker:GetTop()
+	local top = objectiveTracker:GetTop()
 	contentHeight = 0
 	if not top then
 		return
 	end
-	local ns = tracker.NineSlice
+	local ns = objectiveTracker.NineSlice
 	if nsAnchor and ns and ns:IsShown() and nsAnchor[2] and nsAnchor[2].GetBottom then
 		local b = nsAnchor[2]:GetBottom()
 		if b then
@@ -129,7 +121,7 @@ local function UpdateContentHeight()
 end
 
 local function ApplyNineSlice()
-	local ns = tracker.NineSlice
+	local ns = objectiveTracker.NineSlice
 	if not (ns and nsAnchor and visibleHeight) then
 		return
 	end
@@ -138,12 +130,12 @@ local function ApplyNineSlice()
 		return
 	end
 	busy = true
-	ns:SetPoint(nsAnchor[1], tracker, "TOP", nsAnchor[4], -h)
+	ns:SetPoint(nsAnchor[1], objectiveTracker, "TOP", nsAnchor[4], -h)
 	busy = false
 end
 
 local function RestoreNineSlice()
-	local ns = tracker.NineSlice
+	local ns = objectiveTracker.NineSlice
 	if not (ns and nsAnchor) then
 		return
 	end
@@ -188,13 +180,13 @@ local function SetTrackerBase(p, rel, rp, x, y)
 			table.remove(trackerBase, i)
 		end
 	end
-	trackerBase[#trackerBase + 1] = { p, rel or tracker:GetParent(), rp, x, y }
+	trackerBase[#trackerBase + 1] = { p, rel or objectiveTracker:GetParent(), rp, x, y }
 end
 
 local function CaptureTrackerBase()
 	wipe(trackerBase)
-	for i = 1, tracker:GetNumPoints() do
-		local p, rel, rp, x, y = tracker:GetPoint(i)
+	for i = 1, objectiveTracker:GetNumPoints() do
+		local p, rel, rp, x, y = objectiveTracker:GetPoint(i)
 		if p then
 			SetTrackerBase(p, rel, rp, x or 0, y or 0)
 		end
@@ -213,11 +205,11 @@ local function VerticalShift(p)
 end
 
 local function TrackerAnchorsMatch(stretched)
-	if tracker:GetNumPoints() ~= #trackerBase then
+	if objectiveTracker:GetNumPoints() ~= #trackerBase then
 		return false
 	end
 	for i, b in ipairs(trackerBase) do
-		local p, rel, rp, x, y = tracker:GetPoint(i)
+		local p, rel, rp, x, y = objectiveTracker:GetPoint(i)
 		local wx, wy = b[4], b[5]
 		if stretched then
 			wx, wy = wx + shiftX, wy + VerticalShift(b[1])
@@ -236,29 +228,29 @@ local function TrackerAnchorsMatch(stretched)
 end
 
 local function ApplyTrackerAnchors(stretched)
-	if #trackerBase == 0 or Blocked(tracker) or TrackerAnchorsMatch(stretched) then
+	if #trackerBase == 0 or Blocked(objectiveTracker) or TrackerAnchorsMatch(stretched) then
 		return
 	end
 	busy = true
-	tracker:ClearAllPoints()
+	objectiveTracker:ClearAllPoints()
 	for _, b in ipairs(trackerBase) do
 		if stretched then
-			tracker:SetPoint(b[1], b[2], b[3], b[4] + shiftX, b[5] + VerticalShift(b[1]))
+			objectiveTracker:SetPoint(b[1], b[2], b[3], b[4] + shiftX, b[5] + VerticalShift(b[1]))
 		else
-			tracker:SetPoint(b[1], b[2], b[3], b[4], b[5])
+			objectiveTracker:SetPoint(b[1], b[2], b[3], b[4], b[5])
 		end
 	end
 	busy = false
 end
 
 local function StretchTracker()
-	if Blocked(tracker) then
+	if Blocked(objectiveTracker) then
 		return
 	end
 	ApplyTrackerAnchors(true)
-	if math.abs(tracker:GetHeight() - TALL_HEIGHT) > 0.01 then
+	if math.abs(objectiveTracker:GetHeight() - TALL_HEIGHT) > 0.01 then
 		busy = true
-		tracker:SetHeight(TALL_HEIGHT)
+		objectiveTracker:SetHeight(TALL_HEIGHT)
 		busy = false
 	end
 end
@@ -276,11 +268,11 @@ local function HookModule(m)
 		if not p:find("TOP") then
 			return
 		end
-		if rel == nil or rel == clip then
-			rel = tracker
+		if rel == nil or rel == scrollView then
+			rel = objectiveTracker
 		end
-		if rel == tracker then
-			moduleAnchors[self] = { p, tracker, rp, x, y }
+		if rel == objectiveTracker then
+			moduleAnchors[self] = { p, objectiveTracker, rp, x, y }
 			if attached then
 				ApplyModuleAnchor(self)
 			end
@@ -298,7 +290,7 @@ local function HookModule(m)
 end
 
 local function HookNineSlice()
-	local ns = tracker.NineSlice
+	local ns = objectiveTracker.NineSlice
 	if not ns then
 		return
 	end
@@ -316,7 +308,7 @@ local function HookNineSlice()
 		if not p:find("BOTTOM") then
 			return
 		end
-		nsAnchor = { p, rel or tracker, rp, x, y }
+		nsAnchor = { p, rel or objectiveTracker, rp, x, y }
 		dirty = true
 		if attached then
 			UpdateContentHeight()
@@ -326,7 +318,7 @@ local function HookNineSlice()
 end
 
 local function Attach()
-	if attached or Blocked(tracker) then
+	if attached or Blocked(objectiveTracker) then
 		return
 	end
 	for _, m in ipairs(GetModules()) do
@@ -335,16 +327,16 @@ local function Attach()
 		end
 	end
 
-	visibleHeight = tracker:GetHeight()
+	visibleHeight = objectiveTracker:GetHeight()
 	offset, target = 0, 0
-	origClamped = tracker:IsClampedToScreen()
-	tracker:SetClampedToScreen(false)
+	origClamped = objectiveTracker:IsClampedToScreen()
+	objectiveTracker:SetClampedToScreen(false)
 
-	clip:Show()
+	scrollView:Show()
 	attached = true
 	for _, m in ipairs(GetModules()) do
 		HookModule(m)
-		m:SetParent(clip)
+		m:SetParent(scrollView)
 		ApplyModuleAnchor(m)
 	end
 
@@ -354,7 +346,7 @@ local function Attach()
 end
 
 local function Detach()
-	if not attached or Blocked(tracker) then
+	if not attached or Blocked(objectiveTracker) then
 		return
 	end
 	for _, m in ipairs(GetModules()) do
@@ -366,7 +358,7 @@ local function Detach()
 	attached = false
 	offset, target = 0, 0
 	for _, m in ipairs(GetModules()) do
-		m:SetParent(tracker)
+		m:SetParent(objectiveTracker)
 		ApplyModuleAnchor(m)
 	end
 	RestoreNineSlice()
@@ -374,13 +366,13 @@ local function Detach()
 	ApplyTrackerAnchors(false)
 	busy = true
 	if visibleHeight then
-		tracker:SetHeight(visibleHeight)
+		objectiveTracker:SetHeight(visibleHeight)
 	end
 	busy = false
 	if origClamped ~= nil then
-		tracker:SetClampedToScreen(origClamped)
+		objectiveTracker:SetClampedToScreen(origClamped)
 	end
-	clip:Hide()
+	scrollView:Hide()
 end
 
 local function UpdateLayout()
@@ -388,26 +380,26 @@ local function UpdateLayout()
 		return
 	end
 	local top = ClipTop()
-	local p, rel, rp, x, y = clip:GetPoint(1)
+	local p, rel, rp, x, y = scrollView:GetPoint(1)
 	if
-		clip:GetNumPoints() ~= 1
+		scrollView:GetNumPoints() ~= 1
 		or p ~= "TOPLEFT"
-		or rel ~= tracker
+		or rel ~= objectiveTracker
 		or rp ~= "TOPLEFT"
 		or x ~= -LEFT_PAD
 		or y ~= -top
 	then
-		clip:ClearAllPoints()
-		clip:SetPoint("TOPLEFT", tracker, "TOPLEFT", -LEFT_PAD, -top)
+		scrollView:ClearAllPoints()
+		scrollView:SetPoint("TOPLEFT", objectiveTracker, "TOPLEFT", -LEFT_PAD, -top)
 	end
-	local w, h = tracker:GetWidth() + LEFT_PAD + RightPad(), math.max(1, visibleHeight - top)
-	local cw, ch = clip:GetSize()
+	local w, h = objectiveTracker:GetWidth() + LEFT_PAD + RIGHT_PAD, math.max(1, visibleHeight - top)
+	local cw, ch = scrollView:GetSize()
 	if math.abs(cw - w) > 0.01 or math.abs(ch - h) > 0.01 then
-		clip:SetSize(w, h)
+		scrollView:SetSize(w, h)
 	end
-	local level = tracker:GetFrameLevel() + 3
-	if clip:GetFrameLevel() ~= level then
-		clip:SetFrameLevel(level)
+	local level = objectiveTracker:GetFrameLevel() + 3
+	if scrollView:GetFrameLevel() ~= level then
+		scrollView:SetFrameLevel(level)
 	end
 
 	UpdateContentHeight()
@@ -420,40 +412,30 @@ local function UpdateLayout()
 	end
 	ApplyNineSlice()
 
-	local scrollable = range > 0 and tracker:IsVisible()
+	local scrollable = range > 0 and objectiveTracker:IsVisible()
 
 	local wantShift = 0
-	local tr, sr = tracker:GetRight(), UIParent:GetRight()
+	local tr, sr = objectiveTracker:GetRight(), UIParent:GetRight()
 	if tr and sr then
-		local k = UIParent:GetEffectiveScale() / tracker:GetEffectiveScale()
+		local k = UIParent:GetEffectiveScale() / objectiveTracker:GetEffectiveScale()
 		local baseRight = tr - shiftX
-		local pad = scrollable and RightPad() or 0
+		local pad = scrollable and RIGHT_PAD or 0
 		local overflow = baseRight + pad - sr * k
 		wantShift = -math.max(0, math.ceil(overflow))
 	end
-	if wantShift ~= shiftX and #trackerBase > 0 and not Blocked(tracker) then
+	if wantShift ~= shiftX and #trackerBase > 0 and not Blocked(objectiveTracker) then
 		shiftX = wantShift
 		ApplyTrackerAnchors(true)
 	end
 
-	clip:EnableMouseWheel(scrollable)
-	bar:SetShown(scrollable)
+	scrollView:EnableMouseWheel(scrollable)
+	scrollBar:SetShown(scrollable)
 	if scrollable then
-		local w = BarWidth()
-		if w ~= barAnchoredWidth then
-			barAnchoredWidth = w
-			bar:ClearAllPoints()
-			bar:SetWidth(w)
-			bar:SetPoint("TOPLEFT", clip, "TOPRIGHT", -RightPad() + BAR_GAP, -4)
-			bar:SetPoint("BOTTOMLEFT", clip, "BOTTOMRIGHT", -RightPad() + BAR_GAP, 8)
-			thumb:SetWidth(w)
-		end
-
-		local barH = bar:GetHeight()
-		local thumbH = math.max(24, barH * visibleHeight / contentHeight)
-		thumb:SetHeight(thumbH)
-		thumb:ClearAllPoints()
-		thumb:SetPoint("TOP", bar, "TOP", 0, -(barH - thumbH) * (offset / range))
+		syncingScrollBar = true
+		scrollBar:SetPanExtentPercentage(WHEEL_STEP / range)
+		scrollBar:SetVisibleExtentPercentage(visibleHeight / contentHeight)
+		scrollBar:SetScrollPercentage(offset / range, true)
+		syncingScrollBar = false
 	end
 end
 
@@ -468,7 +450,7 @@ local function Tick(_, elapsed)
 	end
 	elapsedAcc = 0
 	dirty = false
-	if not tracker then
+	if not objectiveTracker then
 		return
 	end
 
@@ -484,126 +466,40 @@ local function Tick(_, elapsed)
 
 	for _, m in ipairs(GetModules()) do
 		HookModule(m)
-		if m:GetParent() ~= clip and not Blocked(m) then
-			m:SetParent(clip)
+		if m:GetParent() ~= scrollView and not Blocked(m) then
+			m:SetParent(scrollView)
 			ApplyModuleAnchor(m)
 		end
 	end
-	if not Blocked(tracker) then
-		if tracker:IsClampedToScreen() then
-			tracker:SetClampedToScreen(false)
+	if not Blocked(objectiveTracker) then
+		if objectiveTracker:IsClampedToScreen() then
+			objectiveTracker:SetClampedToScreen(false)
 		end
-		if tracker:GetHeight() < TALL_HEIGHT - 1 then
+		if objectiveTracker:GetHeight() < TALL_HEIGHT - 1 then
 			StretchTracker()
 		end
 	end
 	UpdateLayout()
 end
 
-local function CreateWidgets()
-	clip = CreateFrame("Frame", "ObjectiveScrollClipFrame", tracker)
-	clip:SetClipsChildren(true)
-	clip:SetSize(1, 1)
-	clip:Hide()
-	clip:SetScript("OnMouseWheel", function(_, delta)
+local function CreateScrollUi()
+	scrollView = CreateFrame("Frame", "ObjectiveScrollViewport", objectiveTracker)
+	scrollView:SetClipsChildren(true)
+	scrollView:Hide()
+	scrollView:SetScript("OnMouseWheel", function(_, delta)
 		SetOffset(target - delta * WHEEL_STEP)
 	end)
 
-	bar = CreateFrame("Frame", nil, clip)
-	bar:SetFrameLevel(clip:GetFrameLevel() + 50)
-	bar:EnableMouse(true)
-	bar:Hide()
-	local caps = {}
-	local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
-	local SOLID = "Interface\\Buttons\\WHITE8X8"
-	local function MakePill(frame, layer)
-		local top = frame:CreateTexture(nil, layer)
-		top:SetTexture(CIRCLE)
-		top:SetTexCoord(0, 1, 0, 0.5)
-		top:SetPoint("TOPLEFT")
-		top:SetPoint("TOPRIGHT")
-		caps[#caps + 1] = top
-		local bottom = frame:CreateTexture(nil, layer)
-		bottom:SetTexture(CIRCLE)
-		bottom:SetTexCoord(0, 1, 0.5, 1)
-		bottom:SetPoint("BOTTOMLEFT")
-		bottom:SetPoint("BOTTOMRIGHT")
-		caps[#caps + 1] = bottom
-		local mid = frame:CreateTexture(nil, layer)
-		mid:SetTexture(SOLID)
-		mid:SetPoint("TOPLEFT", top, "BOTTOMLEFT")
-		mid:SetPoint("BOTTOMRIGHT", bottom, "TOPRIGHT")
-		return function(r, g, b, a)
-			for _, t in ipairs({ top, mid, bottom }) do
-				t:SetVertexColor(r, g, b, a)
-			end
-		end
-	end
-
-	local setTrackColor = MakePill(bar, "BACKGROUND")
-	setTrackColor(0, 0, 0, 0.45)
-
-	thumb = CreateFrame("Frame", nil, bar)
-	thumb:EnableMouse(true)
-	local setThumbColor = MakePill(thumb, "ARTWORK")
-	local function SetThumbColor(hover)
-		local c = GetDatabase().barColor
-		local r, g, b = c[1], c[2], c[3]
-		if hover then
-			r, g, b = math.min(1, r + 0.12), math.min(1, g + 0.12), math.min(1, b + 0.12)
-		end
-		setThumbColor(r, g, b, 1)
-	end
-	ApplyBarStyle = function()
-		local w = BarWidth()
-		bar:SetWidth(w)
-		thumb:SetWidth(w)
-		for _, cap in ipairs(caps) do
-			cap:SetHeight(w / 2)
-		end
-		SetThumbColor(thumb:IsMouseOver())
-		dirty = true
-	end
-	ApplyBarStyle()
-	thumb:SetScript("OnShow", function()
-		SetThumbColor(false)
-	end)
-	thumb:SetScript("OnEnter", function()
-		SetThumbColor(true)
-	end)
-	thumb:SetScript("OnLeave", function()
-		SetThumbColor(false)
-	end)
-
-	local function CursorY(frame)
-		local _, y = GetCursorPosition()
-		return y / frame:GetEffectiveScale()
-	end
-
-	thumb:SetScript("OnMouseDown", function(self, button)
-		if button ~= "LeftButton" then
+	scrollBar = CreateFrame("EventFrame", nil, scrollView, "MinimalScrollBar")
+	scrollBar:SetFrameLevel(scrollView:GetFrameLevel() + 50)
+	scrollBar:SetPoint("TOP", scrollView, "TOPRIGHT", -(SCROLLBAR_WIDTH / 2 + 2), -4)
+	scrollBar:SetPoint("BOTTOM", scrollView, "BOTTOMRIGHT", -(SCROLLBAR_WIDTH / 2 + 2), 8)
+	scrollBar:Hide()
+	scrollBar:RegisterCallback("OnScroll", function(_, percentage)
+		if syncingScrollBar then
 			return
 		end
-		local startY, startOffset = CursorY(self), offset
-		self:SetScript("OnUpdate", function()
-			local free = bar:GetHeight() - self:GetHeight()
-			if free > 0 then
-				SetOffset(startOffset + (startY - CursorY(self)) * range / free, true)
-			end
-		end)
-	end)
-	thumb:SetScript("OnMouseUp", function(self)
-		self:SetScript("OnUpdate", nil)
-	end)
-
-	bar:SetScript("OnMouseDown", function(self)
-		local y = CursorY(self)
-		local page = (visibleHeight or 200) * 0.8
-		if y > (thumb:GetTop() or y) then
-			SetOffset(target - page)
-		else
-			SetOffset(target + page)
-		end
+		SetOffset(percentage * range, scrollBar:IsThumbMouseDown())
 	end)
 
 	local driver = CreateFrame("Frame")
@@ -611,7 +507,7 @@ local function CreateWidgets()
 end
 
 local function HookTracker()
-	hooksecurefunc(tracker, "SetHeight", function(_, h)
+	hooksecurefunc(objectiveTracker, "SetHeight", function(_, h)
 		if busy then
 			return
 		end
@@ -621,7 +517,7 @@ local function HookTracker()
 		end
 		dirty = true
 	end)
-	hooksecurefunc(tracker, "SetPoint", function(_, ...)
+	hooksecurefunc(objectiveTracker, "SetPoint", function(_, ...)
 		if busy or type((...)) ~= "string" then
 			return
 		end
@@ -631,15 +527,15 @@ local function HookTracker()
 		end
 		dirty = true
 	end)
-	hooksecurefunc(tracker, "ClearAllPoints", function()
+	hooksecurefunc(objectiveTracker, "ClearAllPoints", function()
 		if not busy then
 			wipe(trackerBase)
 		end
 	end)
-	tracker:HookScript("OnShow", function()
+	objectiveTracker:HookScript("OnShow", function()
 		dirty = true
 	end)
-	tracker:HookScript("OnHide", function()
+	objectiveTracker:HookScript("OnHide", function()
 		dirty = true
 	end)
 	HookNineSlice()
@@ -657,14 +553,17 @@ local function HookTracker()
 	end
 end
 
-local function TryInit()
-	if tracker or not ObjectiveTrackerFrame then
+local function Initialize()
+	if objectiveTracker or not ObjectiveTrackerFrame then
 		return
 	end
-	tracker = ObjectiveTrackerFrame
-	CreateWidgets()
+	objectiveTracker = ObjectiveTrackerFrame
+
+	CreateScrollUi()
 	HookTracker()
 	dirty = true
+
+	-- TODO: Find a way to get the addon to work when in default position
 	if IsDefaultPosition() then
 		Print(
 			"the quest tracker is in its default spot, where Blizzard sizes it to the screen. Move it in Edit Mode to use your custom height + scrolling."
@@ -673,29 +572,6 @@ local function TryInit()
 end
 
 local settingsCategory
-local PRESETS = {
-	{ "Gold", nil },
-	{ "Brown", { 77 / 255, 59 / 255, 36 / 255 } },
-	{ "Gray", { 96 / 255, 96 / 255, 96 / 255 } },
-}
-
-local function HeaderGold()
-	local text = tracker and tracker.Header and tracker.Header.Text
-	if text and text.GetTextColor then
-		local r, g, b = text:GetTextColor()
-		if r then
-			return { r, g, b }
-		end
-	end
-	return { 1, 0.82, 0 }
-end
-
-local function StyleChanged()
-	if ApplyBarStyle then
-		ApplyBarStyle()
-	end
-	dirty = true
-end
 
 local function BuildSettings()
 	if settingsCategory then
@@ -726,172 +602,13 @@ local function BuildSettings()
 		enable:SetChecked(GetDatabase().enabled)
 	end
 
-	local widthLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	widthLabel:SetPoint("TOPLEFT", enable, "BOTTOMLEFT", 2, -20)
-	widthLabel:SetText("Bar width")
-
-	local slider = CreateFrame("Slider", nil, panel)
-	slider:SetOrientation("HORIZONTAL")
-	slider:SetSize(240, 18)
-	slider:SetPoint("TOPLEFT", widthLabel, "BOTTOMLEFT", 4, -10)
-	slider:SetMinMaxValues(MIN_WIDTH, MAX_WIDTH)
-	slider:SetValueStep(1)
-	slider:SetObeyStepOnDrag(true)
-	slider:EnableMouse(true)
-	slider:EnableMouseWheel(true)
-	local groove = slider:CreateTexture(nil, "BACKGROUND")
-	groove:SetPoint("LEFT")
-	groove:SetPoint("RIGHT")
-	groove:SetHeight(6)
-	groove:SetColorTexture(0, 0, 0, 0.6)
-	local grooveEdge = slider:CreateTexture(nil, "BORDER")
-	grooveEdge:SetPoint("TOPLEFT", groove, -1, 1)
-	grooveEdge:SetPoint("BOTTOMRIGHT", groove, 1, -1)
-	grooveEdge:SetColorTexture(0.4, 0.4, 0.4, 0.6)
-	grooveEdge:SetDrawLayer("BACKGROUND", -1)
-	local knob = slider:CreateTexture(nil, "ARTWORK")
-	knob:SetSize(10, 18)
-	knob:SetColorTexture(0.9, 0.75, 0.3, 1)
-	slider:SetThumbTexture(knob)
-
-	local lo = slider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	lo:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -2)
-	lo:SetText(MIN_WIDTH .. "px")
-	local hi = slider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	hi:SetPoint("TOPRIGHT", slider, "BOTTOMRIGHT", 0, -2)
-	hi:SetText(MAX_WIDTH .. "px")
-	local val = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	val:SetPoint("LEFT", slider, "RIGHT", 12, 0)
-
-	local syncing = false
-	slider:SetScript("OnValueChanged", function(_, v)
-		v = math.floor(v + 0.5)
-		val:SetText(v .. " px")
-		if syncing then
-			return
-		end
-		GetDatabase().barWidth = v
-		StyleChanged()
-	end)
-	slider:SetScript("OnMouseWheel", function(self, delta)
-		self:SetValue(self:GetValue() + delta)
-	end)
-	refreshers[#refreshers + 1] = function()
-		syncing = true
-		slider:SetValue(BarWidth())
-		val:SetText(BarWidth() .. " px")
-		syncing = false
-	end
-
-	local colorLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	colorLabel:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4, -30)
-	colorLabel:SetText("Bar colour")
-
-	local function MakeSwatch(parent, size)
-		local b = CreateFrame("Button", nil, parent)
-		b:SetSize(size, size)
-		local border = b:CreateTexture(nil, "BACKGROUND")
-		border:SetAllPoints()
-		border:SetColorTexture(0.6, 0.6, 0.6, 1)
-		b.fill = b:CreateTexture(nil, "ARTWORK")
-		b.fill:SetPoint("TOPLEFT", 2, -2)
-		b.fill:SetPoint("BOTTOMRIGHT", -2, 2)
-		local hl = b:CreateTexture(nil, "HIGHLIGHT")
-		hl:SetAllPoints()
-		hl:SetColorTexture(1, 1, 1, 0.25)
-		return b
-	end
-
-	local current = MakeSwatch(panel, 28)
-	current:SetPoint("TOPLEFT", colorLabel, "BOTTOMLEFT", 0, -10)
-	local currentText = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	currentText:SetPoint("LEFT", current, "RIGHT", 10, 0)
-
-	local function SetColor(r, g, b)
-		GetDatabase().barColor = { r, g, b }
-		current.fill:SetColorTexture(r, g, b, 1)
-		currentText:SetText(
-			string.format(
-				"Custom colour...   (RGB %d, %d, %d)",
-				math.floor(r * 255 + 0.5),
-				math.floor(g * 255 + 0.5),
-				math.floor(b * 255 + 0.5)
-			)
-		)
-		StyleChanged()
-	end
-	refreshers[#refreshers + 1] = function()
-		local c = GetDatabase().barColor
-		current.fill:SetColorTexture(c[1], c[2], c[3], 1)
-		currentText:SetText(
-			string.format(
-				"Custom colour...   (RGB %d, %d, %d)",
-				math.floor(c[1] * 255 + 0.5),
-				math.floor(c[2] * 255 + 0.5),
-				math.floor(c[3] * 255 + 0.5)
-			)
-		)
-	end
-
-	current:SetScript("OnClick", function()
-		local c = GetDatabase().barColor
-		local pr, pg, pb = c[1], c[2], c[3]
-		local function OnChange()
-			local r, g, b = ColorPickerFrame:GetColorRGB()
-			SetColor(r, g, b)
-		end
-		local function OnCancel()
-			SetColor(pr, pg, pb)
-		end
-		if ColorPickerFrame.SetupColorPickerAndShow then
-			ColorPickerFrame:SetupColorPickerAndShow({
-				r = pr,
-				g = pg,
-				b = pb,
-				hasOpacity = false,
-				swatchFunc = OnChange,
-				cancelFunc = OnCancel,
-			})
-		else
-			ColorPickerFrame.hasOpacity = false
-			ColorPickerFrame.previousValues = { pr, pg, pb }
-			ColorPickerFrame.func = OnChange
-			ColorPickerFrame.cancelFunc = OnCancel
-			ColorPickerFrame:SetColorRGB(pr, pg, pb)
-			ColorPickerFrame:Hide()
-			ColorPickerFrame:Show()
-		end
-	end)
-
-	local presetLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	presetLabel:SetPoint("TOPLEFT", current, "BOTTOMLEFT", 0, -14)
-	presetLabel:SetText("Presets:")
-	local PER_ROW, COL_W, ROW_H = 3, 130, 30
-	for i, p in ipairs(PRESETS) do
-		local name, col = p[1], p[2]
-		local sw = MakeSwatch(panel, 22)
-		local c, r = (i - 1) % PER_ROW, math.floor((i - 1) / PER_ROW)
-		sw:SetPoint("TOPLEFT", presetLabel, "BOTTOMLEFT", c * COL_W, -8 - r * ROW_H)
-		local lbl = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		lbl:SetPoint("LEFT", sw, "RIGHT", 6, 0)
-		lbl:SetText(name)
-		sw:SetScript("OnClick", function()
-			local c = col or HeaderGold()
-			SetColor(c[1], c[2], c[3])
-		end)
-		refreshers[#refreshers + 1] = function()
-			local c = col or HeaderGold()
-			sw.fill:SetColorTexture(c[1], c[2], c[3], 1)
-		end
-	end
-
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
-	reset:SetPoint("TOPLEFT", presetLabel, "BOTTOMLEFT", 0, -8 - math.ceil(#PRESETS / PER_ROW) * ROW_H - 16)
+	reset:SetPoint("TOPLEFT", enable, "BOTTOMLEFT", 2, -20)
 	reset:SetText("Reset to defaults")
 	reset:SetScript("OnClick", function()
 		ResetDatabase()
-		StyleChanged()
+		dirty = true
 		for _, fn in ipairs(refreshers) do
 			fn()
 		end
@@ -932,8 +649,7 @@ end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function()
-	GetDatabase()
-	TryInit()
+	Initialize()
 	BuildSettings()
 end)
 
