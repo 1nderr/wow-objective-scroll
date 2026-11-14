@@ -1,54 +1,37 @@
--- ObjectiveScroll
--- Lets Blizzard's objective tracker lay out ALL of its contents (by giving it a tall frame),
--- then shows them through a scrolling window that sits under the (fixed) "All Objectives"
--- header and is as tall as the height you chose in Edit Mode.
---
--- Layout:
---   * ObjectiveTrackerFrame stays exactly where Blizzard/Edit Mode puts it; we only make it tall
---     and un-clamp it from the screen edges.
---   * The header and background stay children of the tracker (so the collapse button still works).
---   * The tracker's modules (Quests, Achievements, ...) are re-parented into our clip frame,
---     which starts just below the header. Scrolling slides the top module (the rest follow).
---   * The background is re-anchored so it never extends past the visible height.
---
--- Taint notes: we never replace Blizzard methods or write fields on Blizzard frames.
--- We only use hooksecurefunc post-hooks and plain widget calls, and skip anything that is
--- protected during combat.
-
-local TALL_HEIGHT = 4000 -- layout height handed to the tracker so nothing gets truncated
-local WHEEL_STEP = 45 -- pixels per mouse-wheel notch
-local LEFT_PAD = 40 -- clip margin on the left (quest icons / background stick out)
-local BAR_GAP = 10 -- gap between the tracker's right edge and the bar
+local TALL_HEIGHT = 4000
+local WHEEL_STEP = 45
+local LEFT_PAD = 40
+local BAR_GAP = 10
 local MIN_WIDTH, MAX_WIDTH = 2, 24
 local DEFAULTS = {
 	enabled = true,
 	barWidth = 8,
-	barColor = { 96 / 255, 96 / 255, 96 / 255 }, -- gray
+	barColor = { 96 / 255, 96 / 255, 96 / 255 },
 }
 local DB_VERSION = 2
-local SMOOTHNESS = 14 -- higher = snappier glide, lower = floatier
+local SMOOTHNESS = 14
 
-local tracker -- ObjectiveTrackerFrame
-local clip -- our clipping frame (child of the tracker)
-local bar, thumb -- scroll bar widgets
+local tracker
+local clip
+local bar, thumb
 local attached = false
 local origClamped
-local visibleHeight -- the height Blizzard wants (your Edit Mode height)
-local offset = 0 -- current scroll offset (what's on screen)
-local target = 0 -- where we're gliding to
-local range = 0 -- max scroll offset
+local visibleHeight
+local offset = 0
+local target = 0
+local range = 0
 local contentHeight = 0
-local moduleAnchors = {} -- [module] = { point, rel, relPoint, x, y } for modules anchored to the tracker top
+local moduleAnchors = {}
 local hookedModules = {}
-local nsAnchor -- Blizzard's bottom anchor for the background: { point, rel, relPoint, x, y }
-local trackerBase = {} -- tracker anchors exactly as Blizzard set them: list of { point, rel, relPoint, x, y }
-local shiftX = 0 -- how far we slide the tracker left so the scroll bar fits on screen
-local busy = false -- guards our own calls from our hooks
+local nsAnchor
+local trackerBase = {}
+local shiftX = 0
+local busy = false
 local editMode = false
 local dirty = true
-local barAnchoredWidth -- bar width the scroll bar was last anchored with (nil = re-anchor)
-local ApplyBarStyle -- defined with the widgets; re-applies width/colour from settings
-local BuildSettings -- defined with the settings page below
+local barAnchoredWidth
+local ApplyBarStyle
+local BuildSettings
 
 local function DB()
 	ObjectiveScrollDB = ObjectiveScrollDB or {}
@@ -74,7 +57,6 @@ local function BarWidth()
 	return math.max(MIN_WIDTH, math.min(MAX_WIDTH, math.floor(DB().barWidth + 0.5)))
 end
 
--- clip margin on the right: room for the gap + the bar + a little slack
 local function RightPad()
 	return BAR_GAP + BarWidth() + 2
 end
@@ -98,18 +80,16 @@ local function IsDefaultPosition()
 end
 
 local function ClipTop()
-	-- where the first module starts; header lives above this
 	return (tonumber(tracker.topModulePadding) or 38) - 4
 end
 
--- Normalise the many SetPoint call forms into point, rel, relPoint, x, y.
 local function ParseSetPoint(p, a, b, c, d)
 	local rel, rp, x, y
-	if type(a) == "number" then -- (p, x, y)
+	if type(a) == "number" then
 		rel, rp, x, y = nil, p, a, b
-	elseif type(b) == "number" then -- (p, rel, x, y)
+	elseif type(b) == "number" then
 		rel, rp, x, y = a, p, b, c
-	else -- (p, rel, relPoint, x, y) / (p, rel) / (p)
+	else
 		rel, rp, x, y = a, b or p, c, d
 	end
 	if type(rel) == "string" then
@@ -130,9 +110,6 @@ local function GetModules()
 	return list
 end
 
----------------------------------------------------------------------------
--- Anchoring
----------------------------------------------------------------------------
 local function ApplyModuleAnchor(m)
 	local a = moduleAnchors[m]
 	if not a or Blocked(m) then
@@ -169,13 +146,11 @@ local function UpdateContentHeight()
 	if nsAnchor and ns and ns:IsShown() and nsAnchor[2] and nsAnchor[2].GetBottom then
 		local b = nsAnchor[2]:GetBottom()
 		if b then
-			-- the last module has been moved up by `offset`; undo that, add Blizzard's padding
 			contentHeight = top - (b - offset) - nsAnchor[5]
 		end
 	end
 end
 
--- Keep the background no taller than the visible window.
 local function ApplyNineSlice()
 	local ns = tracker.NineSlice
 	if not (ns and nsAnchor and visibleHeight) then
@@ -205,14 +180,13 @@ local function ApplyOffset(new)
 		if Blocked(m) then
 			target = offset
 			return
-		end -- can't move protected frames in combat
+		end
 	end
 	offset = new
 	ApplyAllModuleAnchors()
 	dirty = true
 end
 
--- Sets where to scroll to; glides there unless `instant`.
 local function SetOffset(new, instant)
 	target = math.max(0, math.min(range, math.floor(new + 0.5)))
 	if instant and target ~= offset then
@@ -220,7 +194,6 @@ local function SetOffset(new, instant)
 	end
 end
 
--- Eases `offset` toward `target` each frame.
 local function Animate(elapsed)
 	if offset == target then
 		return
@@ -232,12 +205,6 @@ local function Animate(elapsed)
 	ApplyOffset(new)
 end
 
----------------------------------------------------------------------------
--- Tracker anchoring
--- Edit Mode anchors the tracker by whichever point is nearest (TOP*, BOTTOM*, or the middle,
--- depending on where you dropped it). When we stretch it to TALL_HEIGHT, a middle/bottom anchor
--- would make it grow upward off the screen, so we shift that anchor down to keep the top fixed.
----------------------------------------------------------------------------
 local function SetTrackerBase(p, rel, rp, x, y)
 	for i = #trackerBase, 1, -1 do
 		if trackerBase[i][1] == p then
@@ -268,7 +235,6 @@ local function VerticalShift(p)
 	end
 end
 
--- True if the tracker is already anchored exactly as ApplyTrackerAnchors would anchor it.
 local function TrackerAnchorsMatch(stretched)
 	if tracker:GetNumPoints() ~= #trackerBase then
 		return false
@@ -279,17 +245,19 @@ local function TrackerAnchorsMatch(stretched)
 		if stretched then
 			wx, wy = wx + shiftX, wy + VerticalShift(b[1])
 		end
-		if p ~= b[1] or rel ~= b[2] or rp ~= b[3]
-			or math.abs((x or 0) - wx) > 0.01 or math.abs((y or 0) - wy) > 0.01 then
+		if
+			p ~= b[1]
+			or rel ~= b[2]
+			or rp ~= b[3]
+			or math.abs((x or 0) - wx) > 0.01
+			or math.abs((y or 0) - wy) > 0.01
+		then
 			return false
 		end
 	end
 	return true
 end
 
--- Re-anchoring a frame (even to the same spot) makes the game re-check what's under the
--- mouse, which closes and re-opens the hovered quest's tooltip. In a group Blizzard updates
--- the tracker many times a second, so only touch anchors when they actually differ.
 local function ApplyTrackerAnchors(stretched)
 	if #trackerBase == 0 or Blocked(tracker) or TrackerAnchorsMatch(stretched) then
 		return
@@ -306,7 +274,6 @@ local function ApplyTrackerAnchors(stretched)
 	busy = false
 end
 
--- Make the tracker tall while keeping its top edge where Blizzard put it.
 local function StretchTracker()
 	if Blocked(tracker) then
 		return
@@ -319,9 +286,6 @@ local function StretchTracker()
 	end
 end
 
----------------------------------------------------------------------------
--- Hooks (post-hooks only)
----------------------------------------------------------------------------
 local function HookModule(m)
 	if hookedModules[m] then
 		return
@@ -344,7 +308,7 @@ local function HookModule(m)
 				ApplyModuleAnchor(self)
 			end
 		else
-			moduleAnchors[self] = nil -- chained below another module; follows it automatically
+			moduleAnchors[self] = nil
 		end
 		dirty = true
 	end)
@@ -384,9 +348,6 @@ local function HookNineSlice()
 	end)
 end
 
----------------------------------------------------------------------------
--- Attach / detach
----------------------------------------------------------------------------
 local function Attach()
 	if attached or Blocked(tracker) then
 		return
@@ -400,7 +361,7 @@ local function Attach()
 	visibleHeight = tracker:GetHeight()
 	offset, target = 0, 0
 	origClamped = tracker:IsClampedToScreen()
-	tracker:SetClampedToScreen(false) -- a 4000px frame would otherwise be shoved up on screen
+	tracker:SetClampedToScreen(false)
 
 	clip:Show()
 	attached = true
@@ -445,19 +406,20 @@ local function Detach()
 	clip:Hide()
 end
 
----------------------------------------------------------------------------
--- Clip window + scroll bar
----------------------------------------------------------------------------
 local function UpdateLayout()
 	if not visibleHeight then
 		return
 	end
 	local top = ClipTop()
-	-- Only touch the clip when something changed; re-anchoring it every update closes the
-	-- hovered quest's tooltip for a frame (see ApplyTrackerAnchors).
 	local p, rel, rp, x, y = clip:GetPoint(1)
-	if clip:GetNumPoints() ~= 1 or p ~= "TOPLEFT" or rel ~= tracker or rp ~= "TOPLEFT"
-		or x ~= -LEFT_PAD or y ~= -top then
+	if
+		clip:GetNumPoints() ~= 1
+		or p ~= "TOPLEFT"
+		or rel ~= tracker
+		or rp ~= "TOPLEFT"
+		or x ~= -LEFT_PAD
+		or y ~= -top
+	then
 		clip:ClearAllPoints()
 		clip:SetPoint("TOPLEFT", tracker, "TOPLEFT", -LEFT_PAD, -top)
 	end
@@ -483,14 +445,12 @@ local function UpdateLayout()
 
 	local scrollable = range > 0 and tracker:IsVisible()
 
-	-- Slide the whole tracker left by exactly as much as the scroll bar would stick off the
-	-- right edge of the screen (0 if it fits, or if there's no bar to show).
 	local wantShift = 0
 	if scrollable then
 		local tr, sr = tracker:GetRight(), UIParent:GetRight()
 		if tr and sr then
 			local k = UIParent:GetEffectiveScale() / tracker:GetEffectiveScale()
-			local baseRight = tr - shiftX -- where Blizzard/Edit Mode put it
+			local baseRight = tr - shiftX
 			local overflow = baseRight + RightPad() - sr * k
 			wantShift = -math.max(0, math.ceil(overflow))
 		end
@@ -503,14 +463,11 @@ local function UpdateLayout()
 	clip:EnableMouseWheel(scrollable)
 	bar:SetShown(scrollable)
 	if scrollable then
-		-- bar sits just outside the tracker's right edge (BAR_GAP px past it), clear of the
-		-- quest-item buttons. Leave a little room between the tracker and the screen edge.
 		local w = BarWidth()
 		if w ~= barAnchoredWidth then
 			barAnchoredWidth = w
 			bar:ClearAllPoints()
 			bar:SetWidth(w)
-			-- always just outside the tracker's right edge (the tracker is slid left if needed, below)
 			bar:SetPoint("TOPLEFT", clip, "TOPRIGHT", -RightPad() + BAR_GAP, -4)
 			bar:SetPoint("BOTTOMLEFT", clip, "BOTTOMRIGHT", -RightPad() + BAR_GAP, 8)
 			thumb:SetWidth(w)
@@ -524,9 +481,6 @@ local function UpdateLayout()
 	end
 end
 
----------------------------------------------------------------------------
--- Main driver (cheap, throttled)
----------------------------------------------------------------------------
 local elapsedAcc = 0
 local function Tick(_, elapsed)
 	if attached then
@@ -552,7 +506,6 @@ local function Tick(_, elapsed)
 		return
 	end
 
-	-- new modules, or Blizzard shrank / re-clamped the tracker: re-assert when allowed
 	for _, m in ipairs(GetModules()) do
 		HookModule(m)
 		if m:GetParent() ~= clip and not Blocked(m) then
@@ -571,9 +524,6 @@ local function Tick(_, elapsed)
 	UpdateLayout()
 end
 
----------------------------------------------------------------------------
--- Widgets
----------------------------------------------------------------------------
 local function CreateWidgets()
 	clip = CreateFrame("Frame", "ObjectiveScrollClipFrame", tracker)
 	clip:SetClipsChildren(true)
@@ -587,20 +537,19 @@ local function CreateWidgets()
 	bar:SetFrameLevel(clip:GetFrameLevel() + 50)
 	bar:EnableMouse(true)
 	bar:Hide()
-	-- Pill shape: a solid middle plus a round cap at each end (cap = circle, bar-width across).
 	local caps = {}
 	local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 	local SOLID = "Interface\\Buttons\\WHITE8X8"
 	local function MakePill(frame, layer)
 		local top = frame:CreateTexture(nil, layer)
 		top:SetTexture(CIRCLE)
-		top:SetTexCoord(0, 1, 0, 0.5) -- upper half of the circle
+		top:SetTexCoord(0, 1, 0, 0.5)
 		top:SetPoint("TOPLEFT")
 		top:SetPoint("TOPRIGHT")
 		caps[#caps + 1] = top
 		local bottom = frame:CreateTexture(nil, layer)
 		bottom:SetTexture(CIRCLE)
-		bottom:SetTexCoord(0, 1, 0.5, 1) -- lower half of the circle
+		bottom:SetTexCoord(0, 1, 0.5, 1)
 		bottom:SetPoint("BOTTOMLEFT")
 		bottom:SetPoint("BOTTOMRIGHT")
 		caps[#caps + 1] = bottom
@@ -621,7 +570,6 @@ local function CreateWidgets()
 	thumb = CreateFrame("Frame", nil, bar)
 	thumb:EnableMouse(true)
 	local setThumbColor = MakePill(thumb, "ARTWORK")
-	-- colour from settings; a bit lighter while hovered
 	local function SetThumbColor(hover)
 		local c = DB().barColor
 		local r, g, b = c[1], c[2], c[3]
@@ -682,7 +630,6 @@ local function CreateWidgets()
 		end
 	end)
 
-	-- driver lives on its own always-shown frame (clip is hidden while detached)
 	local driver = CreateFrame("Frame")
 	driver:SetScript("OnUpdate", Tick)
 end
@@ -692,10 +639,10 @@ local function HookTracker()
 		if busy then
 			return
 		end
-		visibleHeight = h -- Blizzard's own height = your Edit Mode height
+		visibleHeight = h
 		if attached then
 			StretchTracker()
-		end -- re-stretch now so it never jumps for a frame
+		end
 		dirty = true
 	end)
 	hooksecurefunc(tracker, "SetPoint", function(_, ...)
@@ -765,12 +712,9 @@ ev:SetScript("OnEvent", function(_, event)
 	end
 end)
 
----------------------------------------------------------------------------
--- Settings page (Options > AddOns > ObjectiveScroll)
----------------------------------------------------------------------------
 local settingsCategory
 local PRESETS = {
-	{ "Gold", nil }, -- read from the "All Objectives" text
+	{ "Gold", nil },
 	{ "Brown", { 77 / 255, 59 / 255, 36 / 255 } },
 	{ "Gray", { 96 / 255, 96 / 255, 96 / 255 } },
 }
@@ -798,7 +742,7 @@ function BuildSettings()
 		return
 	end
 	local panel = CreateFrame("Frame")
-	panel:Hide() -- so OnShow fires when the Settings window displays it
+	panel:Hide()
 	panel.name = "ObjectiveScroll"
 	local refreshers = {}
 
@@ -809,7 +753,6 @@ function BuildSettings()
 	sub:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
 	sub:SetText("Scroll bar for the quest tracker. Changes apply instantly.")
 
-	-- Enabled -------------------------------------------------------------
 	local enable = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
 	enable:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", -2, -16)
 	local enableLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
@@ -823,7 +766,6 @@ function BuildSettings()
 		enable:SetChecked(DB().enabled)
 	end
 
-	-- Width ---------------------------------------------------------------
 	local widthLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	widthLabel:SetPoint("TOPLEFT", enable, "BOTTOMLEFT", 2, -20)
 	widthLabel:SetText("Bar width")
@@ -881,7 +823,6 @@ function BuildSettings()
 		syncing = false
 	end
 
-	-- Colour ---------------------------------------------------------------
 	local colorLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	colorLabel:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4, -30)
 	colorLabel:SetText("Bar colour")
@@ -951,7 +892,7 @@ function BuildSettings()
 				swatchFunc = OnChange,
 				cancelFunc = OnCancel,
 			})
-		else -- older picker API
+		else
 			ColorPickerFrame.hasOpacity = false
 			ColorPickerFrame.previousValues = { pr, pg, pb }
 			ColorPickerFrame.func = OnChange
@@ -984,7 +925,6 @@ function BuildSettings()
 		end
 	end
 
-	-- Reset -----------------------------------------------------------------
 	local reset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
 	reset:SetSize(140, 24)
 	reset:SetPoint("TOPLEFT", presetLabel, "BOTTOMLEFT", 0, -8 - math.ceil(#PRESETS / PER_ROW) * ROW_H - 16)
@@ -1031,9 +971,6 @@ local function OpenSettings()
 	end
 end
 
----------------------------------------------------------------------------
--- Slash command
----------------------------------------------------------------------------
 SLASH_OBJECTIVESCROLL1 = "/oscroll"
 SlashCmdList.OBJECTIVESCROLL = function(msg)
 	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
