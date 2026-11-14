@@ -1,24 +1,26 @@
 # ObjectiveScroll
 
-> **AI Disclaimer**
-> This addon and its documentation were made with the help of AI. It has been played with and tested in WoW Forever, but it may not work perfectly in every situation. If something looks wrong, you can turn it off at any time from the addon's settings page.
-
 <p align="center">
   <img src="logo.png" width="160" alt="ObjectiveScroll logo">
 </p>
 
+> **AI Disclaimer**
+> This addon and its documentation were made with the help of AI. It has been played with and tested in WoW Forever, but it may not work perfectly in every situation. If something looks wrong, you can turn it off at any time from the addon's settings page.
+
 ObjectiveScroll lets you scroll through your quest list in World of Warcraft: Forever.
 
-Normally, if you make your quest list shorter in Edit Mode, any quests that don't fit are simply cut off. With ObjectiveScroll, the list stays the size you picked, and you can scroll down to see every quest you're tracking.
+Normally, your quest list only shows as many quests as it can fit within the panel. With ObjectiveScroll, the panel contains every quest you are tracking, and you can scroll through them.
+
+<p align="center">
+  <img src="demo.png" width="160" alt="ObjectiveScroll demo">
+</p>
 
 ## Features
 
-- See all of your tracked quests, even with a short quest list
+- See all of your tracked quests
 - Scroll with your mouse wheel, or drag the scroll bar
 - Smooth scrolling
-- A settings page where you can:
-  - change how wide the scroll bar is
-  - change its color, or pick from Gold, Brown, or Gray
+- Configurable scrollbar width and color
 - Type `/oscroll config` to open the settings page
 
 ## Download

@@ -1,7 +1,3 @@
-# Builds ObjectiveScroll and publishes it whenever a version tag (e.g. v1.0.0) is pushed.
-#  - GitHub Releases: always.
-#  - CurseForge: once "## X-Curse-Project-ID" is in ObjectiveScroll.toc and the
-#    CF_API_KEY secret is set in the repo (Settings > Secrets and variables > Actions).
 name: Release
 
 on:
@@ -9,6 +5,8 @@ on:
     tags:
       - "v*"
 
+# Write is needed to create releases and release assets because
+# GitHub counts them as part of the repo's contents
 permissions:
   contents: write
 
@@ -19,9 +17,13 @@ jobs:
       CF_API_KEY: ${{ secrets.CF_API_KEY }}
       GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Check out the code (with full history, for the changelog)
+      - name: Check out the code
         uses: actions/checkout@v4
         with:
+          # We need to checkout with the full history of every branch and tag
+          # because the BigWigsMods packager needs the previous and current tags
+          # to generate a changelog. The default value of 1 would be a shallow
+          # checkout that only includes the current tag
           fetch-depth: 0
 
       - name: Package and upload

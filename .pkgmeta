@@ -1,6 +1,7 @@
-# Packaging rules for BigWigsMods/packager (used by .github/workflows/release.yml)
 package-as: ObjectiveScroll
 
+# The BigWigsMods packager will automatically ignore dotfiles
+# so they don't need to be listed here.
 ignore:
   - README.md
   - logo.png

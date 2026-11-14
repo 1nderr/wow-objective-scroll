@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: ObjectiveScroll
-## Notes: Lays out every tracked quest and adds a scroll bar, clipped to the height you set in Edit Mode.
+## Notes: Adds a scrollbar to the WoW Forever quest list
 ## Author: 1nderr
 ## Version: @project-version@
 ## SavedVariables: ObjectiveScrollDB
